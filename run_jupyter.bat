@@ -1,3 +1,2 @@
 REM Executed at startup
-rem no-browser
-jupyter notebook --no-browser
+jupyter notebook --port 8889 --no-browser

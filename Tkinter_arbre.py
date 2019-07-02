@@ -19,7 +19,7 @@ import csv
 import easygui as g
 #from IPython.display import display,HTML # Pour afficher les dataframes en pages HTML sous Jupyter
 from tabulate import tabulate      # Permet d'afficher des dataframe en mode texte (pip install tabulate)
-import gmaps
+from gmplot import *               # Gestion de GMAP (API)
 import os                          # pour effacer les fichiers temporaires des graphiques
 from ipywidgets.embed import embed_minimal_html  # Pour exporter en HTML
 
@@ -28,30 +28,80 @@ from tkinter import *       # Importation du module Tkinter
 import tkinter.ttk as ttk   # Ajout plus de Widgets (ComboBox)
 from PIL import Image, ImageTk # Pour les images
 from tk_html_widgets import HTMLLabel # Pour l'HTML
+import webbrowser           # Pour afficher le GMAP HTML
+import datetime
 
-
-def dessine():
+def retourne_DF_filtre(gmap=False):
     """
-        Filtre et affiche un DataFrame suivant les paramètres suivant
-        Arrondissement, Valeur Min, Valeur Max
+        Retourne un DF filté suivant la selection de l'utilisateur
     """
-
-    global df, cb1, scaleMin, scaleMax, text1, label_mess, cb_Liste
+    global df, fenT, cb1, cb2, scaleMin, scaleMax, text1, label_mess, cb_Liste
 
     # Calcul du dataFrame
     arr_ = cb1.get()
+    esp_ = cb2.get()
     min_ = scaleMin.get()
     max_ = scaleMax.get()
 
     df1 = df[(df["HAUTEUR_m"] >= min_) & (df["HAUTEUR_m"] <= max_)]
     if arr_ != "TOUT":
-        dft = df1[df1['ARRONDISSEMENT'].str.contains(arr_)]
+        df2 = df1[df1['ARRONDISSEMENT'].str.contains(arr_, na=False)]
     else:
-        dft = df1
+        df2 = df1
+    if esp_ != "TOUT":
+        dft = df2[df2['LIBELLEFRANCAIS'].str.contains(esp_, na=False)]
+    else:
+        dft = df2
 
-    label_mess.config(text = "{:,}".format(df.shape[0]) + " enregistrements trouvés")
+    if not gmap: # Cache les colonnes demandées sauf pour gmap
+        # Liste les colonnes choisies à afficher
+        list_Aff = []
+        for e in cb_Liste:
+            if e[0].get():
+                list_Aff.append(e[1].cget("text"))
 
-    # Liste les collones choisies à afficher
+        # MAJ du dataframe
+        dft = dft[list_Aff]
+
+    # Update Message
+    label_mess.config(text = "{:,}".format(dft.shape[0]) + " enregistrements trouvés")
+    fenT.title('Par Choix (' + "{:,}".format(dft.shape[0]) + " enregistrements trouvés)")    # Modification du titre de la fenetre Windows
+
+    return dft
+
+def export_csv():
+
+    global df, cb1, cb2, fenT
+
+    dft = retourne_DF_filtre()
+
+    file = g.filesavebox(default="D:\BIGDATA\*.csv", filetypes="*.csv,*.txt")
+
+    try:
+        dft.to_csv(file,index = None, header=True, sep=';') # sauve le nouveau fichier en csv
+        mess = "Sauvegarde effectuée dans le fichier:\n" + file
+        messagebox.showinfo("Exportation", mess)
+    except:
+        mess = "Erreur lors de l'exportation du fichier \n" + file
+        messagebox.showinfo("Exportation", mess)
+
+    fenT.focus_set()
+
+    return None
+
+def dessine():
+    """
+        Affiche un DataFrame suivant les paramètres suivant
+        Arrondissement, Valeur Min, Valeur Max
+    """
+
+    global df, fenT, cb1, cb2, scaleMin, scaleMax, text1, label_mess, cb_Liste
+
+    # Fonction qui filtre la DF
+    dft = retourne_DF_filtre()
+
+    """
+    # Liste les colonnes choisies à afficher
     list_Aff = []
     for e in cb_Liste:
         if e[0].get():
@@ -59,31 +109,55 @@ def dessine():
 
     # MAJ du dataframe
     dft = dft[list_Aff]
+    """
 
     # Affiche le textedf1
     text1.delete(1.0, END) # Supprime le contenu
-    text1.insert(END, tabulate(dft, headers=list_Aff, showindex=False, tablefmt="github")) #, headers=['HAUTEUR', 'QTE'], tablefmt='fancy_grid'))
+    text1.insert(END, tabulate(dft, headers="keys", showindex=False, tablefmt="github")) #, headers=['HAUTEUR', 'QTE'], tablefmt='fancy_grid')) headers=list_Aff,
 
     return None
+
+def callbackFuncARR(event):
+    global cb1, cb2
+
+    #cb2.slistbox.listbox.delete(0, Tix.END)
+
+    # Affiche dans la combobox les especes pour un arrondissement
+    # donné.
+
+    arr_ = cb1.get()
+    if arr_ != "TOUT":
+        df1 = df[df['ARRONDISSEMENT'].str.contains(arr_, na=False)]
+    else:
+        df1 = df
+    df_Esp = df1.groupby("LIBELLEFRANCAIS").size()
+
+    liste = []
+    liste.append("TOUT")            # Ajoute 'TOUT' à la liste
+    for l in df_Esp.iteritems():
+        if len(l[0].strip()) > 0:  # Supprime les espaces et test si len > 0
+            liste.append(l[0])
+    cb2.config(values=liste) # Ajoute la liste au comboBox
+    cb2.set("TOUT")  # Force sur le 1er element (TOUT)
 
 def par_choix():
     """
         Affichage et gestion de la fenetre de filtres
     """
-
-    global df, fen1, cb1, scaleMin, scaleMax, text1, label_mess, cb_Liste
+    global df, fen1, cb1, cb2, scaleMin, scaleMax, text1, label_mess, cb_Liste, fenT
 
     if df.shape[0] > 0:  # Dataframe non vide
 
         df_Arr = df.groupby("ARRONDISSEMENT").size()
+        df_Esp = df.groupby("LIBELLEFRANCAIS").size()
         df_Hauteur_Max = df[df["HAUTEUR_m"]<=40]["HAUTEUR_m"].max()
         df_Hauteur_Min = df["HAUTEUR_m"].min()
 
         fenT = Toplevel(fen1) #,height=25,width=25
-        print(fenT.winfo_screenmmwidth)
-        fenT.geometry("1024x800")
+        #print(fenT.winfo_screenmmwidth)
+        fenT.geometry("1200x800")
         fenT.title("Par Choix")
-        fenT.maxsize(width= 1024, height=800)
+        fenT.maxsize(width= 1200, height=800)
 
         # Création des composants (Widgets) dans la fenetre
         menubar = Menu(fenT)
@@ -96,16 +170,28 @@ def par_choix():
 
         # ComboBox
         lab1 = Label(fenT,text="Arrondisement:")
-        lab1.place(x = 5, y = 25)
+        lab1.place(x = 5, y = 5)
         liste = []
         liste.append("TOUT")            # Ajoute 'TOUT' à la liste
         for l in df_Arr.iteritems():
             if len(l[0].strip()) > 0:  # Supprime les espaces et test si len > 0
                 liste.append(l[0])
         cb1 = ttk.Combobox(fenT,values=liste) # Ajoute la liste au comboBox
-        cb1.place(x = 100, y = 25)
+        cb1.place(x = 100, y = 5)
         cb1.set("TOUT")  # Force sur le 1er element (TOUT)
+        cb1.bind("<<ComboboxSelected>>", callbackFuncARR)  # Gere l'evenement selection
         cb1.focus_set() # Focus sur le combBox
+
+        lab3 = Label(fenT,text="Espece:")
+        lab3.place(x = 5, y = 30)
+        liste = []
+        liste.append("TOUT")            # Ajoute 'TOUT' à la liste
+        for l in df_Esp.iteritems():
+            if len(l[0].strip()) > 0:  # Supprime les espaces et test si len > 0
+                liste.append(l[0])
+        cb2 = ttk.Combobox(fenT,values=liste) # Ajoute la liste au comboBox
+        cb2.place(x = 100, y = 30)
+        cb2.set("TOUT")  # Force sur le 1er element (TOUT)
 
         # Hauteur Min/Max
         hauteur_labelframe = LabelFrame(fenT, text="Hauteur", height=120, width=200)
@@ -115,12 +201,14 @@ def par_choix():
         lab2.place(x = 5, y = 10)
         scaleValMin = DoubleVar()
         scaleMin = Scale( hauteur_labelframe, variable = scaleValMin, from_ = df_Hauteur_Min, to = df_Hauteur_Max, orient = HORIZONTAL)
+        scaleMin.set(df_Hauteur_Min)
         scaleMin.place(x = 40, y = 0)
 
         lab2 = Label(hauteur_labelframe,text="Max:")
         lab2.place(x = 5, y = 55)
         scaleValMax = DoubleVar()
         scaleMax = Scale( hauteur_labelframe, variable = scaleValMax, from_ = df_Hauteur_Min, to = df_Hauteur_Max, orient = HORIZONTAL)
+        scaleMax.set(df_Hauteur_Max)
         scaleMax.place(x = 40, y = 45)
 
         # Nom des colonnes dans des checkboxs
@@ -137,20 +225,28 @@ def par_choix():
             cb_Liste.append(cbl)
             idx +=1
 
-        # Bouton
-        bouton_Ok = Button(fenT,text = "Filtre",command = dessine, pady=10)
-        bouton_Ok.place(x = 100, y = 60)
+        # Bouton Filtre
+        bouton_Ok = Button(fenT,text = "Filtre",command = dessine, pady=5)
+        bouton_Ok.place(x = 50, y = 80)
+
+        # Bouton Carte
+        bouton_Carte = Button(fenT,text = "Carte...",command = show_Browser, pady=5)
+        bouton_Carte.place(x = 130, y = 80)
+
+        # Bouton Export
+        bouton_Carte = Button(fenT,text = "Export...",command = export_csv, pady=5)
+        bouton_Carte.place(x = 210, y = 80)
 
         # Zone text
         text1 = Text(fenT, wrap=WORD, yscrollcommand=scrollbar.set)
         text1.place(x = 1, y = 130)
-        text1.config(height=40, width=125)
+        text1.config(height=40, width=146)
         scrollbar.config(command=text1.yview)
 
         # Message
-        label_mess = Label(hauteur_labelframe,text="--",bg = "lightgray")
-        label_mess.place(x = 1, y = 800-20)
-        label_mess.config(height = 19, width = 798)
+        label_mess = Label(fenT,text="",bg = "lightgray")
+        label_mess.place(x = 1, y = 800-23)
+        label_mess.config(height = 1, width = 167) #798
 
         fenT.mainloop()
     else:
@@ -159,41 +255,44 @@ def par_choix():
 
     return None
 
-def show_Browser(): #dft,titre="DB Arbres",fichier=None):
+def show_Browser():
     """
-        A finir... Ne fonctionne pas
+        Affiche une carte GMAP dans un browser suivant
+        les paramètres suivant Arrondissement, Valeur Min, Valeur Max et Espèce
     """
 
-    global df, fen1
+    global df, cb1, scaleMin, scaleMax, text1, label_mess, cb_Liste, fenT
 
-    # filtre
-    df1 = df[(df["HAUTEUR_m"] >= 1) & (df["HAUTEUR_m"] <= 40) & (df['LIBELLEFRANCAIS'] == "Platane")]
-    #df1 = df1.head(10000)
-
-    #display(HTML("<h1><center>CARTE FILTREE SUR LES PLATANES (Qte: " + str(df1.shape[0]) + ")</center></h1>"))
+    arr_ = cb1.get()
+    dft = retourne_DF_filtre(gmap=True)
 
     locations = []
-    for index, row in df1.iterrows():
+    for index, row in dft.iterrows():
         long,lat = row["geo_point_2d"].split(",")
         locations.append((float(long),float(lat)))
 
-    #print(locations)
+    # Place map
+    # First two arugments are the geogrphical coordinates .i.e. Latitude and Longitude
+    # and the zoom resolution.
+    gmap = gmplot.GoogleMapPlotter(48.858478, 2.342539, 12)   # Centre de Paris
+    gmap.apikey = "AIzaSyB-ERbM70w9Q-hhEtOKq7I1JD-g9XJ3n9M"
 
-    gmaps.configure(api_key='AIzaSyB-ERbM70w9Q-hhEtOKq7I1JD-g9XJ3n9M')
+    # Scatter points
+    top_attraction_lats, top_attraction_lons = zip(*locations)
+    #gmap.scatter(top_attraction_lats, top_attraction_lons, '#00FF00', size=5, marker=False)
+    gmap.heatmap(top_attraction_lats, top_attraction_lons)
+    gmap.scatter(top_attraction_lats, top_attraction_lons, '#00FF00', marker=True)
 
-    fig = gmaps.figure()
+    # Marker
+    hidden_gem_lat, hidden_gem_lon = 48.858478, 2.342539
+    gmap.marker(hidden_gem_lat, hidden_gem_lon, '#FF0000')
 
-    """
-    heatmap_layer = gmaps.heatmap_layer(locations)
-    fig.add_layer(heatmap_layer)
-    #fig
-    """
-    print(fig)
-
-    embed_minimal_html('export.html', views=[fig])
-
-    webbrowser.open("http://0.0.0.0:8080/export.html")
-
+    # Location where you want to save your file.
+    date = datetime.datetime.now()
+    file_name = ("{}-{}-{}_{}-{}-{}_{}".format(date.year,date.month,date.day,date.hour,date.minute,date.second,arr_))
+    html_file = "D:\\Data\\www\\" + file_name + ".html"
+    gmap.draw(html_file)
+    webbrowser.open(html_file)          # Affiche dans un browser
 
     return None
 
@@ -427,11 +526,12 @@ def importDB_CSV():
     file = g.fileopenbox(default="D:\BIGDATA\*.*")
 
     df = pd.read_csv(file,
-        usecols = ['IDBASE','ARRONDISSEMENT','DOMANIALITE','LIBELLEFRANCAIS','HAUTEUR (m)','geo_point_2d'],
+        #usecols = ['IDBASE','ARRONDISSEMENT','DOMANIALITE','LIBELLEFRANCAIS','HAUTEUR (m)','geo_point_2d'],
+        usecols = ['IDBASE','ARRONDISSEMENT','DOMANIALITE','LIBELLEFRANCAIS','HAUTEUR_m','geo_point_2d'],
         dtype = {'IDBASE': int,'HAUTEUR (m)': int},
         sep=';')
     #change le nom de l'entete afin de supprimer les caracteres non autorisés
-    df.rename(columns={'HAUTEUR (m)': 'HAUTEUR_m'}, inplace=True)
+    #df.rename(columns={'HAUTEUR (m)': 'HAUTEUR_m'}, inplace=True)
 
     mess = "Téléchargement effectué.\n" + "{:,}".format(df.shape[0]) + " enregistrements récupérés."
     messagebox.showinfo("Importation", mess)
@@ -478,7 +578,7 @@ def main():
     graph.add_command(label="Hauteur Min/Max par ARRONDISSEMENT", command=hauteur_Min_Max_par_ARRONDISSEMENT)
     graph.add_separator()
     graph.add_command(label="Liste Parametrable...", command=par_choix)
-    graph.add_command(label="gmaps...", command=show_Browser)
+    #graph.add_command(label="Cartes ...", command=show_Browser)
     menubar.add_cascade(label="Graph", menu=graph)
     #self.menubar.entryconfig("Test2", state="normal")
     menubar.entryconfig("Graph", state="disabled")   # Déactivé par défaut
@@ -490,8 +590,21 @@ def main():
 
     # Création de la frame du bas
     message = Label(fen1,text="GRETA 2019", bg = 'lightgray')
-    message.place(x = 1, y = 230)
+    message.place(x = 1, y = 228)
     message.config(height=1, width=56)
+
+    # Image de fond
+    c = Canvas(fen1, bg = 'white' )
+    c.place(x=0,y=0)
+    h = 225
+    w = 400
+    c.config(height=h, width=w)
+    img = Image.open("arbre.jpg")
+
+    img = img.resize((w, h), Image.ANTIALIAS)
+    img_fond = ImageTk.PhotoImage(img)
+    #c.create_image(h/2,w/2,image=img_fond)
+    c.create_image(w/2,h/2,image=img_fond)
 
     fen1.mainloop()         # Boucle sur les événements
 
