@@ -34,6 +34,7 @@ import datetime
 def retourne_DF_filtre(gmap=False):
     """
         Retourne un DF filté suivant la selection de l'utilisateur
+        si gmap == True, retourne toute les colonnes
     """
     global df, fenT, cb1, cb2, scaleMin, scaleMax, text1, label_mess, cb_Liste
 
