@@ -11,29 +11,98 @@
 
 # Lien en Francais sur Tkinter --> http://tkinter.fdex.eu/index.html
 
-import pandas as pd               # Pandas
-import matplotlib.pyplot as plt   # Pour faire les graphiques (installer via pip)
-#import numpy as np
+import pandas as pd                 # Pandas
+import matplotlib.pyplot as plt     # Pour faire les graphiques (installer via pip)
 import csv
-
-import easygui as g
-#from IPython.display import display,HTML # Pour afficher les dataframes en pages HTML sous Jupyter
-from tabulate import tabulate      # Permet d'afficher des dataframe en mode texte (pip install tabulate)
-from gmplot import *               # Gestion de GMAP (API)
-import os                          # pour effacer les fichiers temporaires des graphiques
+from tabulate import tabulate       # Permet d'afficher des dataframe en mode texte (pip install tabulate)
+from gmplot import *                # Gestion de GMAP (API) (installer via pip)
+import os                           # pour effacer les fichiers temporaires des graphiques
 from ipywidgets.embed import embed_minimal_html  # Pour exporter en HTML
-
-from tkinter import *       # Importation du module Tkinter
-                            # Ce module est déjà intégré à Python 3
-import tkinter.ttk as ttk   # Ajout plus de Widgets (ComboBox)
-from PIL import Image, ImageTk # Pour les images
-from tk_html_widgets import HTMLLabel # Pour l'HTML
-import webbrowser           # Pour afficher le GMAP HTML
+from tkinter import *               # Importation du module Tkinter
+                                    # Ce module est déjà intégré à Python 3
+from tkinter import filedialog      # Boite de dialogue (open et save file)
+import tkinter.ttk as ttk           # Ajoute plus de Widgets (ComboBox)
+from PIL import Image, ImageTk      # Pour gerer les images
+import webbrowser                   # Pour afficher le GMAP avec un browser
 import datetime
+
+# Installer le module "openpyxl" (pip install openpyxl) pour
+# exporter sous excel si besoin.
+
+def hauteur_Min_Max_parametrable():
+    """
+        Création d'un graphique à partir des valeurs séléctionnées
+    """
+
+    global cb1, cb2
+
+    arr_ = cb1.get()
+    esp_ = cb2.get()
+
+    # Définit la taille des graphiques
+    # Get current size
+    fig_size = plt.rcParams["figure.figsize"]
+
+    # Set figure width to 15 and height to 10
+    fig_size[0] = 10
+    fig_size[1] = 7
+    plt.rcParams["figure.figsize"] = fig_size
+
+    df1 = retourne_DF_filtre()
+
+    dfmin = df1.groupby(["ARRONDISSEMENT"])["HAUTEUR_m"].min()   # Création d'une liste avec la taille min par Arrondissement
+    dfmax = df1.groupby(["ARRONDISSEMENT"])["HAUTEUR_m"].max()   # Création d'une liste avec la taille max par Arrondissement
+
+    df2 = pd.concat([dfmin, dfmax], axis=1).reset_index()    # Création d'une dataframe avec les deux listes
+    df2 = df2.set_axis(['ARRONDISSEMENT','MIN', 'MAX'], axis=1, inplace=False)  # Nommage des colonnes
+
+    ax = plt.gca() # gca stands for 'get current axis'
+    df2.plot(kind='bar',x='ARRONDISSEMENT',y='MAX', color='blue', ax=ax)  # Création des 2 graphes
+    df2.plot(kind='bar',x='ARRONDISSEMENT',y='MIN', color='red', ax=ax)
+
+    plt.title('Min/Max par ARRONDISSEMENT (' + arr_ + ') pour ' + esp_)    # Titre
+    plt.ylabel("Hauteur (m)")
+    plt.xticks(rotation=50)
+    plt.grid(True)                             # Affichage d'une grille
+
+    # Sauve le graphe
+    fichier = 'hauteur_Min_Max_Graph.png'
+    sauve_Graphe(fichier)
+
+    # Clear the current axes.
+    plt.cla()
+    # Clear the current figure.
+    plt.clf()
+    # Closes all the figure windows.
+    plt.close('all')
+
+    show_fenetre_text(df2,"Hauteur Min/Max par ARRONDISSEMENT",fichier) # Affiche les données dans une autre fenetre
+
+    return None
+
+
+def manageSelectionColonne():
+    """
+    Active ou déactive la checkbox 'Tri" suivant si on affiche ou
+    pas la colonne correspondante
+    """
+
+    global cb_liste
+
+    for e in cb_Liste:
+        if e[0].get():          # Etat de la checkbox 'selection'
+            #e[3].select()
+            e[3].config(state="normal")
+        else:
+            e[3].deselect()
+            e[3].config(state="disabled")
+
+    return None
 
 def retourne_DF_filtre(gmap=False):
     """
         Retourne un DF filté suivant la selection de l'utilisateur
+        via le checkbox séléctionnées.
         si gmap == True, retourne toute les colonnes
     """
     global df, fenT, cb1, cb2, scaleMin, scaleMax, text1, label_mess, cb_Liste
@@ -61,8 +130,18 @@ def retourne_DF_filtre(gmap=False):
             if e[0].get():
                 list_Aff.append(e[1].cget("text"))
 
-        # MAJ du dataframe
+        # MAJ du dataframe avec les colonnes choisies.
         dft = dft[list_Aff]
+
+        # Gestion du tri
+        list_Sort = []
+        for e in cb_Liste:
+            if e[2].get():
+               list_Sort.append(e[1].cget("text"))
+
+        # MAJ du dataframe avec les colonnes triées si existe
+        if len(list_Sort) > 0:
+            dft = dft.sort_values(list_Sort)
 
     # Update Message
     label_mess.config(text = "{:,}".format(dft.shape[0]) + " enregistrements trouvés")
@@ -71,20 +150,38 @@ def retourne_DF_filtre(gmap=False):
     return dft
 
 def export_csv():
+    """
+        Exporte sous CSC ou sous EXCEL
+    """
 
     global df, cb1, cb2, fenT
 
     dft = retourne_DF_filtre()
 
-    file = g.filesavebox(default="D:\BIGDATA\*.csv", filetypes="*.csv,*.txt")
+    arr_ = cb1.get()
+    esp_ = cb2.get()
 
-    try:
-        dft.to_csv(file,index = None, header=True, sep=';') # sauve le nouveau fichier en csv
-        mess = "Sauvegarde effectuée dans le fichier:\n" + file
-        messagebox.showinfo("Exportation", mess)
-    except:
-        mess = "Erreur lors de l'exportation du fichier \n" + file
-        messagebox.showinfo("Exportation", mess)
+    file = filedialog.asksaveasfilename(initialdir = "./",title = "Select file",filetypes = (("CSV files","*.csv *.txt"),("EXCEL files","*.xlsx *.xls"),("all files","*.*")))
+
+    if len(file) >0:
+        try:
+            # Récupère l'extension
+            ext = file.split(".")[len(file.split("."))-1].upper()
+
+            if ext == 'CSV' or ext == "TXT":
+                dft.to_csv(file,index = None, header=True, sep=';') # sauve le nouveau fichier en csv
+                mess = "Sauvegarde effectuée dans le fichier:\n" + file
+                messagebox.showinfo("Exportation", mess)
+            elif ext == "XLSX" or ext == "XLS":
+                dft.to_excel(file, sheet_name=arr_+"-"+esp_, index=False) # sauve le nouveau fichier en excel
+                os.system('start EXCEL.EXE "' + file + '"')
+            else:
+                mess = "Cette extension n'est pas gérée.\n" + file
+                messagebox.showinfo("Exportation", mess)
+
+        except:
+            mess = "Erreur lors de l'exportation du fichier \n" + file
+            messagebox.showinfo("Exportation", mess)
 
     fenT.focus_set()
 
@@ -101,17 +198,6 @@ def dessine():
     # Fonction qui filtre la DF
     dft = retourne_DF_filtre()
 
-    """
-    # Liste les colonnes choisies à afficher
-    list_Aff = []
-    for e in cb_Liste:
-        if e[0].get():
-            list_Aff.append(e[1].cget("text"))
-
-    # MAJ du dataframe
-    dft = dft[list_Aff]
-    """
-
     # Affiche le textedf1
     text1.delete(1.0, END) # Supprime le contenu
     text1.insert(END, tabulate(dft, headers="keys", showindex=False, tablefmt="github")) #, headers=['HAUTEUR', 'QTE'], tablefmt='fancy_grid')) headers=list_Aff,
@@ -119,13 +205,14 @@ def dessine():
     return None
 
 def callbackFuncARR(event):
+    """
+        Permet de rafraichir la combobox "Espèce" en live
+        suivant le choix de "Arrondicement"
+    """
+
     global cb1, cb2
 
-    #cb2.slistbox.listbox.delete(0, Tix.END)
-
-    # Affiche dans la combobox les especes pour un arrondissement
-    # donné.
-
+    # Affiche dans la combobox les especes pour un arrondissement donné.
     arr_ = cb1.get()
     if arr_ != "TOUT":
         df1 = df[df['ARRONDISSEMENT'].str.contains(arr_, na=False)]
@@ -145,7 +232,7 @@ def par_choix():
     """
         Affichage et gestion de la fenetre de filtres
     """
-    global df, fen1, cb1, cb2, scaleMin, scaleMax, text1, label_mess, cb_Liste, fenT
+    global df, root, cb1, cb2, scaleMin, scaleMax, text1, label_mess, cb_Liste, fenT
 
     if df.shape[0] > 0:  # Dataframe non vide
 
@@ -154,8 +241,7 @@ def par_choix():
         df_Hauteur_Max = df[df["HAUTEUR_m"]<=40]["HAUTEUR_m"].max()
         df_Hauteur_Min = df["HAUTEUR_m"].min()
 
-        fenT = Toplevel(fen1) #,height=25,width=25
-        #print(fenT.winfo_screenmmwidth)
+        fenT = Toplevel(root)
         fenT.geometry("1200x800")
         fenT.title("Par Choix")
         fenT.maxsize(width= 1200, height=800)
@@ -163,9 +249,11 @@ def par_choix():
         # Création des composants (Widgets) dans la fenetre
         menubar = Menu(fenT)
         menubar.add_command(label="Fermer", command=fenT.destroy)
+
         # Affiche le menu
         fenT.config(menu=menubar)
 
+        # ScrollBar pour la zone texte
         scrollbar = Scrollbar(fenT)
         scrollbar.pack(side=RIGHT, fill=Y)
 
@@ -217,26 +305,44 @@ def par_choix():
         idx = 0
         for nomCol in df.columns:
             cbl = []
-            cb_ = IntVar()
-            cb = Checkbutton(fenT, text = nomCol, variable = cb_)
+
+            cb_ = BooleanVar()
+            cb = Checkbutton(fenT, text = nomCol, variable = cb_, command=lambda: manageSelectionColonne())
             cb.select()
             cb.place(x = 500, y = idx*20 + 5)
+
+            cbs_ = BooleanVar()
+            cbs = Checkbutton(fenT, text = "Trié", variable = cbs_)
+            cbs.place(x = 700, y = idx*20 + 5)
+
             cbl.append(cb_)
             cbl.append(cb)
+
+            cbl.append(cbs_)
+            cbl.append(cbs)
+
             cb_Liste.append(cbl)
             idx +=1
 
         # Bouton Filtre
         bouton_Ok = Button(fenT,text = "Filtre",command = dessine, pady=5)
-        bouton_Ok.place(x = 50, y = 80)
+        bouton_Ok.place(x = 10, y = 80)
+        bouton_Ok.config(width = 5, height = 1)
 
         # Bouton Carte
         bouton_Carte = Button(fenT,text = "Carte...",command = show_Browser, pady=5)
-        bouton_Carte.place(x = 130, y = 80)
+        bouton_Carte.place(x = 60, y = 80)
+        bouton_Carte.config(width = 5, height = 1)
 
         # Bouton Export
-        bouton_Carte = Button(fenT,text = "Export...",command = export_csv, pady=5)
-        bouton_Carte.place(x = 210, y = 80)
+        bouton_Export = Button(fenT,text = "Export...",command = export_csv, pady=5)
+        bouton_Export.place(x = 110, y = 80)
+        bouton_Export.config(width = 6, height = 1)
+
+        # Bouton Graph
+        bouton_Graph = Button(fenT,text = "Graph. Min/Max",command = hauteur_Min_Max_parametrable, pady=5)
+        bouton_Graph.place(x = 170, y = 80)
+        bouton_Graph.config(width = 13, height = 1)
 
         # Zone text
         text1 = Text(fenT, wrap=WORD, yscrollcommand=scrollbar.set)
@@ -303,10 +409,10 @@ def show_fenetre_text(dft,titre="DB Arbres",fichier=None):
         'fichier' est le path+nom d'une image à afficher en plus du texte
     """
 
-    global fen1
+    global root
 
     if dft.shape[0] > 0:  # Dataframe non vide
-        fenT = Toplevel(fen1) #,height=25,width=25
+        fenT = Toplevel(root) #,height=25,width=25
         fenT.geometry("1024x800")
         fenT.title(titre)
         fenT.maxsize(width= 1024, height=800)
@@ -496,7 +602,7 @@ def affichage_taille_arbre():
 
 def importDB_URL():
     # Définir les variables globales
-    global df, menubar, message
+    global df, menubar, message, fenT
 
     message.config(text="Importation en cours. Veuillez patienter...")
     message.update()
@@ -504,50 +610,67 @@ def importDB_URL():
     #affichage de l'URL
     url='https://opendata.paris.fr/explore/dataset/les-arbres/download/?format=csv&timezone=Europe/Berlin&use_labels_for_header=true'
     #chargement du fichier
-    df = pd.read_csv(url,
-        usecols = ['IDBASE','ARRONDISSEMENT','DOMANIALITE','LIBELLEFRANCAIS','HAUTEUR (m)','geo_point_2d'],
-        dtype = {'IDBASE': int,'HAUTEUR (m)': int},
-        sep=';')
-    #change le nom de l'entete afin de supprimer les caracteres non autorisés
-    df.rename(columns={'HAUTEUR (m)': 'HAUTEUR_m'}, inplace=True)
+    try:
+        df = pd.read_csv(url,
+            usecols = ['IDBASE','ARRONDISSEMENT','DOMANIALITE','LIBELLEFRANCAIS','HAUTEUR (m)','geo_point_2d'],
+            dtype = {'IDBASE': int,'HAUTEUR (m)': int},
+            sep=';')
+        #change le nom de l'entete afin de supprimer les caracteres non autorisés
+        df.rename(columns={'HAUTEUR (m)': 'HAUTEUR_m'}, inplace=True)
 
-    df.to_csv(r'D:\BIGDATA\Datas_arbres.csv',index = None, header=True, sep=';') # sauve le nouveau fichier en csv
+       # df.to_csv(r'D:\BIGDATA\Datas_arbres.csv',index = None, header=True, sep=';') # sauve le nouveau fichier en csv
+        df.to_csv(r'.\Datas_arbres.csv',index = None, header=True, sep=';') # sauve le nouveau fichier en csv
 
-    mess = "Téléchargement effectué.\n" + "{:,}".format(df.shape[0]) + " enregistrements récupérés. Sauvegarde sur le PC effectuée"
-    messagebox.showinfo("Importation", mess)
+        mess = "Téléchargement effectué.\n" + "{:,}".format(df.shape[0]) + " enregistrements récupérés. Sauvegarde sur le PC effectuée"
+        messagebox.showinfo("Importation", mess)
 
-    # Active le menu graphe
-    menubar.entryconfig("Graph", state="normal")
+        # Active le menu graphe
+        menubar.entryconfig("Graph", state="normal")
 
-    message.config(text='D:\BIGDATA\Datas_arbres.csv' + " --> " + "{:,}".format(df.shape[0]) + " enregistrements")
+        message.config(text='.\Datas_arbres.csv' + " --> " + "{:,}".format(df.shape[0]) + " enregistrements")
+    except:
+        mess = "Erreur lors de l'importation des données \n" + file
+        messagebox.showinfo("Importation", mess)
+
+    root.focus_set()
 
 def importDB_CSV():
-    global df, menubar, message
+    global df, menubar, message, fenT
 
-    file = g.fileopenbox(default="D:\BIGDATA\*.*")
+    #file = g.fileopenbox(default="D:\BIGDATA\*.*")
 
-    df = pd.read_csv(file,
-        #usecols = ['IDBASE','ARRONDISSEMENT','DOMANIALITE','LIBELLEFRANCAIS','HAUTEUR (m)','geo_point_2d'],
-        usecols = ['IDBASE','ARRONDISSEMENT','DOMANIALITE','LIBELLEFRANCAIS','HAUTEUR_m','geo_point_2d'],
-        dtype = {'IDBASE': int,'HAUTEUR (m)': int},
-        sep=';')
-    #change le nom de l'entete afin de supprimer les caracteres non autorisés
-    #df.rename(columns={'HAUTEUR (m)': 'HAUTEUR_m'}, inplace=True)
+    file = filedialog.askopenfilename(initialdir = "./",filetypes = (("CSV files","*.csv"),("all files","*.*")))
 
-    mess = "Téléchargement effectué.\n" + "{:,}".format(df.shape[0]) + " enregistrements récupérés."
-    messagebox.showinfo("Importation", mess)
+    if len(file) > 0:
+        try:
+            df = pd.read_csv(file,
+            #usecols = ['IDBASE','ARRONDISSEMENT','DOMANIALITE','LIBELLEFRANCAIS','HAUTEUR (m)','geo_point_2d'],
+            usecols = ['IDBASE','ARRONDISSEMENT','DOMANIALITE','LIBELLEFRANCAIS','HAUTEUR_m','geo_point_2d'],
+            dtype = {'IDBASE': int,'HAUTEUR (m)': int},
+            sep=';')
+            #change le nom de l'entete afin de supprimer les caracteres non autorisés
+            #df.rename(columns={'HAUTEUR (m)': 'HAUTEUR_m'}, inplace=True)
 
-    # Active le menu graphe
-    menubar.entryconfig("Graph", state="normal")
+            mess = "Téléchargement effectué.\n" + "{:,}".format(df.shape[0]) + " enregistrements récupérés."
+            messagebox.showinfo("Importation", mess)
 
-    message.config(text=file + " --> " + "{:,}".format(df.shape[0]) + " enregistrements")
+            # Active le menu graphe
+            menubar.entryconfig("Graph", state="normal")
+
+            message.config(text="{:,}".format(df.shape[0]) + " enregistrements")
+
+        except:
+            mess = "Erreur lors de l'importation du fichier \n" + file
+            messagebox.showinfo("Importation", mess)
+
+    root.focus_set()
 
     return None
 
 def main():
     # Définir les variables globales
     global df
-    global fen1
+    global root
     global menubar, message
 
     # Parametrage de Pandas et de MatPlotLib
@@ -557,13 +680,13 @@ def main():
     pd.set_option('display.width', 1000)        # Force à afficher les longues chaines
 
     # Programme principal
-    fen1 = Tk()                     # Création de l'instance de la fentetre
-    fen1.title('DB Arbres')    # Modification du titre de la fenetre Windows
-    fen1.geometry("400x250")
-    fen1.maxsize(width= 400, height=250)
+    root = Tk()                     # Création de l'instance de la fentetre
+    root.title('DB Arbres')    # Modification du titre de la fenetre Windows
+    root.geometry("400x250")
+    root.maxsize(width= 400, height=250)
 
     # Création des composants (Widgets) dans la fenetre
-    menubar = Menu(fen1)
+    menubar = Menu(root)
     #•menubar.add_command(label="Importer DB", command=importDB)
 
     graph = Menu(menubar, tearoff=0)
@@ -578,24 +701,24 @@ def main():
     graph.add_command(label="Hauteur Min/Max par DOMANIALITE", command=hauteur_Min_Max_par_DOMANIALITE)
     graph.add_command(label="Hauteur Min/Max par ARRONDISSEMENT", command=hauteur_Min_Max_par_ARRONDISSEMENT)
     graph.add_separator()
-    graph.add_command(label="Liste Parametrable...", command=par_choix)
+    graph.add_command(label="Liste Paramétrable...", command=par_choix)
     #graph.add_command(label="Cartes ...", command=show_Browser)
     menubar.add_cascade(label="Graph", menu=graph)
     #self.menubar.entryconfig("Test2", state="normal")
     menubar.entryconfig("Graph", state="disabled")   # Déactivé par défaut
 
-    menubar.add_command(label="Quitter", command=fen1.destroy)
+    menubar.add_command(label="Quitter", command=root.destroy)
 
     # Affiche le menu
-    fen1.config(menu=menubar)
+    root.config(menu=menubar)
 
     # Création de la frame du bas
-    message = Label(fen1,text="GRETA 2019", bg = 'lightgray')
+    message = Label(root,text="GRETA 2019", bg = 'lightgray')
     message.place(x = 1, y = 228)
     message.config(height=1, width=56)
 
     # Image de fond
-    c = Canvas(fen1, bg = 'white' )
+    c = Canvas(root, bg = 'white' )
     c.place(x=0,y=0)
     h = 225
     w = 400
@@ -607,7 +730,7 @@ def main():
     #c.create_image(h/2,w/2,image=img_fond)
     c.create_image(w/2,h/2,image=img_fond)
 
-    fen1.mainloop()         # Boucle sur les événements
+    root.mainloop()         # Boucle sur les événements
 
 if __name__ == '__main__':
     main()
